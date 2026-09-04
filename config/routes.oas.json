@@ -4,5 +4,189 @@
     "version": "1.0.0",
     "title": "My Zuplo API"
   },
-  "paths": {}
+  "paths": {
+    "/mcp/demo-v1": {
+      "get,post": {
+        "operationId": "demo-mcp-server",
+        "summary": "Demo MCP Proxy",
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(@zuplo/runtime/mcp-gateway)",
+            "export": "McpProxyHandler",
+            "options": {
+              "rewritePattern": "https://demo-mcp-server.spreston1022.workers.dev/mcp"
+            }
+          },
+          "policies": {
+            "inbound": [
+              "auth0-managed-oauth",
+              "demo-mcp-upstream-key",
+              "demo-mcp-capability-filter"
+            ]
+          }
+        }
+      }
+    },
+    "/echo": {
+      "post": {
+        "operationId": "echoTool",
+        "summary": "Echo a message",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text to echo back"
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(./modules/echo-tool)",
+            "export": "default"
+          },
+          "mcp": {
+            "type": "tool",
+            "name": "echo",
+            "description": "Echoes the provided text back"
+          }
+        }
+      }
+    },
+    "/time": {
+      "get": {
+        "operationId": "getCurrentTimeTool",
+        "summary": "Get the current time",
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(./modules/get-current-time-tool)",
+            "export": "default"
+          },
+          "mcp": {
+            "type": "tool",
+            "name": "get_current_time",
+            "description": "Returns the current UTC time in ISO 8601 format"
+          }
+        }
+      }
+    },
+    "/echo-downstream": {
+      "post": {
+        "operationId": "echoDownstreamTool",
+        "summary": "Echo via echo.zuplo.io, with an Auth0 token exchange on the hop",
+        "description": "Exchanges the caller's inbound access token for a new token scoped to a different downstream audience (via Auth0 Custom Token Exchange), then forwards to echo.zuplo.io -- a public reflector, so the exchanged token is visible in the response's headers.authorization for verification.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text to echo back"
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(@zuplo/runtime)",
+            "export": "urlForwardHandler",
+            "options": {
+              "baseUrl": "https://echo.zuplo.io"
+            }
+          },
+          "policies": {
+            "inbound": ["token-exchange-inbound"]
+          },
+          "mcp": {
+            "type": "tool",
+            "name": "echo",
+            "description": "Echoes back the provided text, via a downstream call authenticated by a token exchange"
+          }
+        }
+      }
+    },
+    "/mcp-server-delegated": {
+      "post": {
+        "operationId": "mcp-server-delegated",
+        "summary": "Pure MCP Server with per-user token exchange to a downstream API",
+        "description": "MCP server (mcpServerHandler) protected by a plain Keycloak-issued JWT policy (not Zuplo's DCR wrapper -- that would mint the gateway's own opaque token, discarding the original token this route needs to exchange). Instead, a hand-rolled PRM document plus a 401 discovery hint let MCP clients (e.g. claude.ai) do DCR and browser login directly against Keycloak, so the real Keycloak-issued token reaches this route intact. The one tool, echo, exchanges that token for a new one scoped to a downstream API audience before forwarding.",
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(@zuplo/runtime)",
+            "export": "mcpServerHandler",
+            "options": {
+              "name": "demo-mcp-server-delegated",
+              "version": "1.0.0",
+              "operations": [
+                { "file": "./config/routes.oas.json", "id": "echoDownstreamTool" }
+              ]
+            }
+          },
+          "policies": {
+            "inbound": ["require-bearer-with-prm-hint", "mcp-jwt-auth-inbound"]
+          }
+        }
+      }
+    },
+    "/internal/mcp-server-delegated/prm": {
+      "get": {
+        "operationId": "mcpServerDelegatedPrm",
+        "summary": "Hand-rolled RFC 9728 PRM document for /mcp-server-delegated",
+        "description": "McpGatewayPlugin claims the whole /.well-known/oauth-protected-resource/* wildcard project-wide and rejects any route it doesn't itself manage (Unknown MCP route), and OpenIdJwtInboundPolicy's oAuthResourceMetadataEnabled flag routes through that same shared mechanism -- so this serves the same RFC 9728 shape manually, at a path that doesn't collide.",
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(./modules/mcp-server-delegated-prm)",
+            "export": "default"
+          }
+        }
+      }
+    },
+    "/mcp-server": {
+      "post": {
+        "operationId": "mcp-server",
+        "summary": "Pure MCP Server (no upstream proxy)",
+        "description": "MCP server built directly from this project's own routes via mcpServerHandler, with DCR-based inbound auth and role-gated tool access -- no external upstream MCP server involved.",
+        "x-zuplo-route": {
+          "corsPolicy": "none",
+          "handler": {
+            "module": "$import(@zuplo/runtime)",
+            "export": "mcpServerHandler",
+            "options": {
+              "name": "demo-mcp-server-standalone",
+              "version": "1.0.0",
+              "operations": [
+                { "file": "./config/routes.oas.json", "id": "echoTool" },
+                { "file": "./config/routes.oas.json", "id": "getCurrentTimeTool" }
+              ]
+            }
+          },
+          "policies": {
+            "inbound": ["auth0-managed-oauth", "demo-mcp-capability-filter"]
+          }
+        }
+      }
+    }
+  }
 }

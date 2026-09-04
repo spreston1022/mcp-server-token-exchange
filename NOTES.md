@@ -1,20 +1,14 @@
-# Notes: DCR + token exchange, MCP Gateway vs MCP Server
+# Notes: token exchange on a standalone MCP Server
 
-This repo has two routes that expose an MCP server through Zuplo, using two
-different patterns:
+This repo exposes a single MCP server route, `/mcp-server-delegated`
+(`mcpServerHandler`), that performs a real per-user token exchange
+(RFC 8693) before calling its downstream API: the caller's token is
+exchanged for a new token scoped to the downstream API, rather than the
+caller's original token being forwarded as-is. It uses Keycloak for this
+because it needs Custom Token Exchange, which requires an Auth0 plan tier
+this tenant doesn't have.
 
-- **`/mcp-server`** and **`/mcp/demo-v1`** use Zuplo's built-in DCR-based
-  OAuth policies (`auth0-managed-oauth`). A client (like claude.ai) can
-  discover the login flow, register itself, and authenticate through Auth0
-  automatically, with no manual token setup.
-- **`/mcp-server-delegated`** performs a real per-user token exchange
-  (RFC 8693): the caller's token is exchanged for a new token scoped to the
-  downstream API before the upstream call is made, rather than forwarding
-  the caller's original token. It uses Keycloak instead of Auth0 for this,
-  because it needs Custom Token Exchange, which requires an Auth0 plan tier
-  this tenant doesn't have.
-
-## Why `/mcp-server-delegated` doesn't use the same DCR policies
+## Why this route doesn't use Zuplo's built-in DCR policies
 
 Zuplo's DCR-based OAuth policies (`mcp-*-oauth-inbound`) issue their own
 session token to the caller and handle the provider token internally --
@@ -35,9 +29,11 @@ register and log in against Keycloak itself.
 
 This metadata document lives at a project-specific path rather than the
 conventional `/.well-known/oauth-protected-resource/mcp-server-delegated`
-path, because that conventional path is already served by `McpGatewayPlugin`
-for `/mcp-server` and `/mcp/demo-v1`'s DCR flows, and its metadata endpoint
-only serves the routes it manages itself.
+path: `OpenIdJwtInboundPolicy`'s own `oAuthResourceMetadataEnabled` option
+routes through the same shared metadata mechanism `McpGatewayPlugin` uses
+for its own DCR-based routes, which only serves the routes it manages
+itself -- so a route using plain JWT validation needs to publish its
+metadata document elsewhere.
 
 ## Demo environment
 
